@@ -13,17 +13,23 @@ import com.alibaba.excel.write.style.HorizontalCellStyleStrategy;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.HorizontalAlignment;
 import org.apache.poi.ss.usermodel.IndexedColors;
-import org.springframework.web.multipart.MultipartFile;
 
 import javax.servlet.http.HttpServletResponse;
-import java.io.*;
+import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.URLEncoder;
-import java.nio.file.Files;
 import java.util.*;
 
 @Slf4j
 public class ExcelUtil {
+
+    /*
+    * 三种excel文件类型分别对应的响应头格式
+    * */
+    private static final String XLS_CONTENT_TYPE = "application/vnd.ms-excel";
+    private static final String XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    private static final String CSV_CONTENT_TYPE = "text/csv";
 
     /*
     * 导出excel的通用方法
@@ -37,7 +43,17 @@ public class ExcelUtil {
         HorizontalCellStyleStrategy styleStrategy = setCellStyle();
         // 对文件名进行UTF-8编码、拼接文件后缀名
         fileName = URLEncoder.encode(fileName, "UTF-8").replaceAll("\\+", "%20") + excelType.getValue();
-        response.setContentType("application/vnd.ms-excel");
+        switch (excelType) {
+            case XLS:
+                response.setContentType(XLS_CONTENT_TYPE);
+                break;
+            case XLSX:
+                response.setContentType(XLSX_CONTENT_TYPE);
+                break;
+            case CSV:
+                response.setContentType(CSV_CONTENT_TYPE);
+                break;
+        }
         response.setCharacterEncoding("utf-8");
         response.setHeader("Content-Disposition", "attachment;filename*=utf-8''" + fileName);
 
