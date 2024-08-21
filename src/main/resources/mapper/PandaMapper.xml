@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.zhuzi.mapper.PandaMapper">
+    <resultMap id="pandaMap" type="com.zhuzi.entity.Panda">
+        <id column="id" property="id" />
+        <result column="name" property="name"/>
+        <result column="nickname" property="nickname"/>
+        <result column="unique_code" property="uniqueCode"/>
+        <result column="sex" property="sex"/>
+        <result column="height" property="height"/>
+        <result column="birthday" property="birthday"/>
+        <result column="pic" property="pic"/>
+        <result column="level" property="level"/>
+        <result column="motto" property="motto"/>
+        <result column="address" property="address"/>
+        <result column="create_time" property="createTime"/>
+        <result column="is_deleted" property="isDeleted"/>
+    </resultMap>
+
+    <resultMap id="countMap" type="com.zhuzi.base.CountVO">
+        <result column="unique_code" property="key" javaType="java.lang.String" />
+        <result column="count_num" property="value" javaType="java.lang.Integer" />
+    </resultMap>
+
+    <resultMap id="boMap" type="com.zhuzi.model.bo.PandaStatisticsBO">
+        <result column="sex" property="sex" />
+        <result column="level" property="level" />
+        <result column="counting" property="counting" />
+        <result column="height_count" property="heightGte170cm" />
+    </resultMap>
+
+    <sql id="Vo_Column_List">
+        `id`,`name`,`nickname`,`unique_code`,`sex`,`height`,`birthday`,`pic`,`level`,`motto`,`address`,`create_time`,`is_deleted`
+    </sql>
+
+    <select id="selectPandas" resultType="com.zhuzi.model.vo.PandaExportVO">
+        select
+          `id`,`nickname`,`unique_code` as `uniqueCode`,`sex`,`height`,`birthday`,`create_time` as `createTime`
+        from
+            panda
+        where
+            is_deleted = 0
+            <if test="params.keyword != null and params.keyword != ''">
+              and (name like CONCAT('%', #{params.keyword}, '%')
+                    or nickname like CONCAT('%', #{params.keyword}, '%')
+                    or unique_code like CONCAT('%', #{params.keyword}, '%')
+                  )
+            </if>
+            <if test="params.startTime != null and params.startTime != ''
+                    and params.endTime != null and params.endTime != ''">
+                and birthday &gt;= #{params.startTime} and birthday &lt;= #{params.endTime}
+            </if>
+    </select>
+
+    <select id="selectCountByUniCodes" resultMap="countMap">
+        select unique_code, count(*) as count_num from panda where is_deleted = 0 and unique_code in
+            <foreach collection="uniCodes" item="uniCode" separator="," open="(" close=")">
+                #{uniCode}
+            </foreach>
+        group by
+            unique_code
+    </select>
+
+    <select id="selectPandaStatistics" resultMap="boMap">
+        SELECT
+            <if test="params.statisticsType == 0">
+                sex,
+            </if>
+            <if test="params.statisticsType == 1">
+                level,
+            </if>
+            count(1) AS counting,
+            sum(CASE WHEN height >= '170.00' THEN 1 ELSE 0 END) AS height_count
+        FROM
+            panda
+        WHERE
+            is_deleted = 0
+            <if test="params.statisticsType == 0">
+                GROUP BY sex
+            </if>
+            <if test="params.statisticsType == 1">
+                GROUP BY `level`
+            </if>
+    </select>
+
+    <select id="selectAllPandas" resultType="com.zhuzi.model.vo.MultiLineHeadExportVO">
+        select
+            nickname,unique_code as uniqueCode, sex, height, birthday, level, motto, create_time as createTime
+        from
+            panda
+        where is_deleted = 0
+    </select>
+</mapper>
