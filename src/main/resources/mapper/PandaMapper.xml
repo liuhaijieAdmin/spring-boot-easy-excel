@@ -91,4 +91,27 @@
             panda
         where is_deleted = 0
     </select>
+
+    <select id="select1mPandas" resultType="com.zhuzi.model.vo.Panda1mExportVO">
+        select
+            `id`,`name`,`nickname`,`unique_code` as uniqueCode,`sex`,`height`,`birthday`,`pic`,`level`,`motto`,`address`
+        from
+            panda
+        where is_deleted = 0
+    </select>
+
+    <select id="selectPandaPage" resultType="com.zhuzi.model.vo.Panda1mExportVO">
+        select
+            `id`,`name`,`nickname`,`unique_code` as uniqueCode,`sex`,`height`,`birthday`,`pic`,`level`,`motto`,`address`
+        from
+            panda
+        where
+            is_deleted = 0
+            and id >= #{startId}
+        limit #{rows}
+    </select>
+
+    <select id="selectTotalRows" resultType="java.lang.Integer">
+        select count(*) from panda where is_deleted = 0
+    </select>
 </mapper>

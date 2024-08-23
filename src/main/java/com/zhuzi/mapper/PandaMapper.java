@@ -8,6 +8,7 @@ import com.zhuzi.model.bo.PandaStatisticsBO;
 import com.zhuzi.model.dto.PandaQueryDTO;
 import com.zhuzi.model.dto.PandaStatisticsDTO;
 import com.zhuzi.model.vo.MultiLineHeadExportVO;
+import com.zhuzi.model.vo.Panda1mExportVO;
 import com.zhuzi.model.vo.PandaExportVO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -31,4 +32,10 @@ public interface PandaMapper extends BaseMapper<Panda> {
     List<PandaStatisticsBO> selectPandaStatistics(@Param("params") PandaStatisticsDTO statisticsDTO);
 
     List<MultiLineHeadExportVO> selectAllPandas();
+
+    List<Panda1mExportVO> select1mPandas();
+
+    List<Panda1mExportVO> selectPandaPage(@Param("startId") Long startId, @Param("rows") Integer rows);
+
+    int selectTotalRows();
 }

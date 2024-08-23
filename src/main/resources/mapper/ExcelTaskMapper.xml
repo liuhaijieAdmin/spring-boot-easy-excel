@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.zhuzi.mapper.ExcelTaskMapper">
+  <resultMap id="excelTaskMap" type="com.zhuzi.entity.ExcelTask">
+    <id column="task_id" property="taskId" />
+    <result column="task_type" property="taskType"/>
+    <result column="handle_status" property="handleStatus"/>
+    <result column="excel_url" property="excelUrl"/>
+    <result column="trace_id" property="traceId"/>
+    <result column="request_params" property="requestParams"/>
+    <result column="exception_type" property="exceptionType"/>
+    <result column="error_msg" property="errorMsg"/>
+    <result column="create_time" property="createTime"/>
+    <result column="update_time" property="updateTime"/>
+  </resultMap>
+
+  <sql id="Vo_Column_List">
+    `task_id`,`task_type`,`handle_status`,`excel_url`,`trace_id`,`request_params`,`exception_type`,`error_msg`,`create_time`,`update_time`
+  </sql>
+
+  <update id="updateStatusById">
+    update excel_task set handle_status = #{status}, update_time = now() where task_id = #{taskId}
+  </update>
+</mapper>

@@ -52,4 +52,14 @@ public interface PandaService extends IService<Panda> {
 	* 导出多行头的excel文件
 	* */
 	void exportMultiLineHeadExcel(HttpServletResponse response);
+
+	/*
+	* 导出百万量级的excel文件
+	* */
+	void export1mPandaExcel(HttpServletResponse response);
+
+	/*
+	 * 导出百万量级的excel文件（优化版）
+	 * */
+	Long export1mPandaExcelV2();
 }

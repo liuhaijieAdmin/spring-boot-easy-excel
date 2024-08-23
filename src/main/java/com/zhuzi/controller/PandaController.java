@@ -54,13 +54,22 @@ public class PandaController {
     }
 
     @PostMapping("/export/v3")
-    public void exportExcelV2(@RequestBody PandaStatisticsDTO statisticsDTO, HttpServletResponse response) {
+    public void exportExcelV3(@RequestBody PandaStatisticsDTO statisticsDTO, HttpServletResponse response) {
         pandaService.exportStatisticsData(statisticsDTO, response);
     }
 
     @PostMapping("/export/v4")
-    public void exportExcelV2(HttpServletResponse response) {
+    public void exportExcelV4(HttpServletResponse response) {
         pandaService.exportMultiLineHeadExcel(response);
     }
 
+    @PostMapping("/export/v5")
+    public void exportExcelV5(HttpServletResponse response) {
+        pandaService.export1mPandaExcel(response);
+    }
+
+    @PostMapping("/export/v6")
+    public ServerResponse<Long> exportExcelV6() {
+        return ServerResponse.success(pandaService.export1mPandaExcelV2());
+    }
 }

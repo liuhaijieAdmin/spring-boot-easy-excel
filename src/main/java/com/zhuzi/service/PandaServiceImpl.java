@@ -1,13 +1,19 @@
 package com.zhuzi.service;
 
 import com.alibaba.excel.EasyExcelFactory;
+import com.alibaba.excel.ExcelWriter;
 import com.alibaba.excel.support.ExcelTypeEnum;
+import com.alibaba.excel.write.metadata.WriteSheet;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zhuzi.base.BaseImportExcelVO;
 import com.zhuzi.base.CountVO;
+import com.zhuzi.config.TaskThreadPool;
+import com.zhuzi.entity.ExcelTask;
 import com.zhuzi.entity.Panda;
+import com.zhuzi.enums.ExcelTaskType;
 import com.zhuzi.enums.ResponseCode;
 import com.zhuzi.enums.Sex;
+import com.zhuzi.enums.TaskHandleStatus;
 import com.zhuzi.exception.BusinessException;
 import com.zhuzi.listener.CommonListener;
 import com.zhuzi.mapper.PandaMapper;
@@ -20,10 +26,12 @@ import com.zhuzi.model.vo.*;
 import com.zhuzi.util.ExcelUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.annotation.Resource;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -31,6 +39,11 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
@@ -39,6 +52,9 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class PandaServiceImpl extends ServiceImpl<PandaMapper, Panda> implements PandaService {
+
+    @Resource
+    private ExcelTaskService excelTaskService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -223,8 +239,139 @@ public class PandaServiceImpl extends ServiceImpl<PandaMapper, Panda> implements
         try {
             ExcelUtil.exportExcel(MultiLineHeadExportVO.class, pandas, fileName, ExcelTypeEnum.XLSX, response);
         } catch (IOException e) {
-            log.error("多行表头熊猫数据，{}：{}", e, e.getMessage());
+            log.error("多行表头熊猫数据导出出错，{}：{}", e, e.getMessage());
             throw new BusinessException("数据导出失败，请稍后再试！");
         }
+    }
+
+    @Override
+    public void export1mPandaExcel(HttpServletResponse response) {
+        List<Panda1mExportVO> pandas = baseMapper.select1mPandas();
+        String fileName = "百万级熊猫数据-" + System.currentTimeMillis();
+        try {
+            ExcelUtil.exportExcel(Panda1mExportVO.class, pandas, fileName, ExcelTypeEnum.XLSX, response);
+        } catch (IOException e) {
+            log.error("百万级熊猫数据导出出错，{}：{}", e, e.getMessage());
+            throw new BusinessException("数据导出失败，请稍后再试！");
+        }
+    }
+
+    @Override
+    public Long export1mPandaExcelV2() {
+        // 先插入一条报表任务记录
+        ExcelTask excelTask = new ExcelTask();
+        excelTask.setTaskType(ExcelTaskType.EXPORT.getCode());
+        excelTask.setHandleStatus(TaskHandleStatus.WAIT_HANDLE.getCode());
+        excelTask.setCreateTime(new Date());
+        excelTaskService.save(excelTask);
+        Long taskId = excelTask.getTaskId();
+
+        // 将报表导出任务提交给异步线程池
+        ThreadPoolTaskExecutor asyncPool = TaskThreadPool.getAsyncThreadPool();
+
+        // 必须用try包裹，因为线程池已满时任务被拒绝会抛出异常
+        try {
+            asyncPool.submit(() -> {
+                handleExportTask(taskId);
+            });
+        } catch (RejectedExecutionException e) {
+            // 记录等待恢复的状态
+            log.error("递交异步导出任务被拒，线程池任务已满，任务ID：{}", taskId);
+            ExcelTask editTask = new ExcelTask();
+            editTask.setTaskId(taskId);
+            editTask.setHandleStatus(TaskHandleStatus.WAIT_TO_RESTORE.getCode());
+            editTask.setExceptionType("异步线程池任务已满");
+            editTask.setErrorMsg("等待重新载入线程池被调度！");
+            editTask.setUpdateTime(new Date());
+            excelTaskService.updateById(editTask);
+        }
+
+        return taskId;
+    }
+
+    /*
+    * 处理报表导出任务
+    * */
+    private void handleExportTask(Long taskId) {
+        long startTime = System.currentTimeMillis();
+        log.info("处理报表导出任务开始，编号：{}，时间戳：{}", taskId, startTime);
+        // 开始执行时，先将状态推进到进行中
+        excelTaskService.updateStatus(taskId, TaskHandleStatus.IN_PROGRESS);
+
+        // 需要修改的报表对象
+        ExcelTask editTask = new ExcelTask();
+        editTask.setTaskId(taskId);
+
+        // 查询导出的总行数，如果为0，说明没有数据要导出，直接将任务推进到失败状态
+        int totalRows = baseMapper.selectTotalRows();
+        if (totalRows == 0) {
+            editTask.setHandleStatus(TaskHandleStatus.FAILED.getCode());
+            editTask.setExceptionType("数据为空");
+            editTask.setErrorMsg("对应导出任务没有数据可导出！");
+            editTask.setUpdateTime(new Date());
+            excelTaskService.updateById(editTask);
+            return;
+        }
+
+        // 总数除以每批数量，并向上取整得到批次数
+        int batchRows = 2000;
+        int batchNum = totalRows / batchRows + (totalRows % batchRows == 0 ? 0 : 1);
+        // 总批次数除以并发比例，并向上取整得到并发轮数
+        int concurrentRound = batchNum / TaskThreadPool.concurrentRate
+                + (batchNum % TaskThreadPool.concurrentRate == 0 ? 0 : 1);;
+
+        log.info("本次报表导出任务-目标数据量：{}条，每批数量：{}，总批次数：{}，并发总轮数：{}", totalRows, batchRows, batchNum, concurrentRound);
+
+        // 提前创建excel写入对象（这里可以替换成上传至文件服务器）
+        String fileName = "百万级熊猫数据-" + startTime + ".csv";
+        ExcelWriter excelWriter = EasyExcelFactory.write(fileName, Panda1mExportVO.class)
+                .excelType(ExcelTypeEnum.CSV)
+                .build();
+        // CSV文件这行其实可以不需要，设置了也不会生效
+        WriteSheet writeSheet = EasyExcelFactory.writerSheet(0, "百万熊猫数据").build();
+
+        // 根据计算出的并发轮数开始并发读取表内数据处理
+        AtomicInteger cursor = new AtomicInteger(0);
+        ThreadPoolTaskExecutor concurrentPool = TaskThreadPool.getConcurrentThreadPool();
+        for (int i = 1; i <= concurrentRound; i++) {
+            CountDownLatch countDownLatch = new CountDownLatch(TaskThreadPool.concurrentRate);
+            final CopyOnWriteArrayList<Panda1mExportVO> data = new CopyOnWriteArrayList<>();
+            for (int j = 0; j < TaskThreadPool.concurrentRate; j++) {
+                final int startId = cursor.get() * batchRows + 1;
+//                    log.info("当前批次：{}，起始ID：{}，线程池可用线程数：{}", cursor.get(), startId, concurrentPool.getActiveCount());
+                concurrentPool.submit(() -> {
+                    List<Panda1mExportVO> pandas = baseMapper.selectPandaPage((long) startId, batchRows);
+                    if (null != pandas && pandas.size() != 0) {
+                        data.addAll(pandas);
+                    }
+                    countDownLatch.countDown();
+                });
+                cursor.incrementAndGet();
+            }
+
+            try {
+                countDownLatch.await();
+            } catch (InterruptedException e) {
+                editTask.setHandleStatus(TaskHandleStatus.FAILED.getCode());
+                editTask.setExceptionType("导出等待中断");
+                editTask.setErrorMsg(e.getMessage());
+                editTask.setUpdateTime(new Date());
+                excelTaskService.updateById(editTask);
+                return;
+            }
+            excelWriter.write(data, writeSheet);
+            // 手动清理每一轮的集合数据，用于辅助GC
+            data.clear();
+        }
+
+        log.info("处理报表导出任务结束，编号：{}，导出耗时（ms）：{}", taskId, System.currentTimeMillis() - startTime);
+        // 完成写入后，主动关闭资源
+        excelWriter.finish();
+
+        // 如果执行到最后，说明excel导出成功，将状态推进到导出成功
+        editTask.setHandleStatus(TaskHandleStatus.SUCCEED.getCode());
+        editTask.setExcelUrl(fileName);
+        editTask.setUpdateTime(new Date());
+        excelTaskService.updateById(editTask);
     }
 }
