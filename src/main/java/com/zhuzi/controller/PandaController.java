@@ -43,6 +43,32 @@ public class PandaController {
         return ServerResponse.success(pandaService.importExcelV2(file));
     }
 
+    @PostMapping("/import/v3")
+    public ServerResponse<Void> importExcelV3(MultipartFile file) {
+        if (null == file) {
+            throw new BusinessException(ResponseCode.FILE_IS_NULL);
+        }
+        pandaService.import1MExcelV1(file);
+        return ServerResponse.success();
+    }
+
+    @PostMapping("/import/v4")
+    public ServerResponse<Void> importExcelV4(MultipartFile file) {
+        if (null == file) {
+            throw new BusinessException(ResponseCode.FILE_IS_NULL);
+        }
+        pandaService.import1MExcelV2(file);
+        return ServerResponse.success();
+    }
+
+    @PostMapping("/import/v5")
+    public ServerResponse<Long> importExcelV5(MultipartFile file) {
+        if (null == file) {
+            throw new BusinessException(ResponseCode.FILE_IS_NULL);
+        }
+        return ServerResponse.success(pandaService.import1MExcelV3(file));
+    }
+
     @PostMapping("/export/v1")
     public void exportExcelV1(@RequestBody PandaQueryDTO queryDTO, HttpServletResponse response) {
         pandaService.exportExcelByCondition(queryDTO, response);

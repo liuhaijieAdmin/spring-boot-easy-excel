@@ -1,14 +1,13 @@
 package com.zhuzi.demo;
 
 import com.alibaba.excel.EasyExcel;
-import com.alibaba.excel.enums.CellDataTypeEnum;
-import com.alibaba.excel.metadata.data.WriteCellData;
-import com.alibaba.excel.util.ListUtils;
+import com.alibaba.excel.EasyExcelFactory;
+import com.alibaba.excel.ExcelReader;
+import com.alibaba.excel.support.ExcelTypeEnum;
 import com.zhuzi.listener.CommonListener;
 import com.zhuzi.model.excel.PandaReadModel;
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -47,7 +46,35 @@ public class SimpleDemo {
         System.out.println("读取excel文件结束，总计解析到" + data + "条数据！");
     }
 
-    public static void main(String[] args) {
-        readDemo2();
+    public static void readDemo3() {
+        String fileName = "多Sheet.xlsx";
+        List<PandaReadModel> pandas = new ArrayList<>();
+
+        // 第一种读取多Sheet的方式（存在一定隐患，数据可能读取不准确）
+        CommonListener<PandaReadModel> listener = new CommonListener<>(PandaReadModel.class);
+        ExcelReader excelReader = EasyExcel.read(fileName, PandaReadModel.class, listener).excelType(ExcelTypeEnum.XLSX).build();
+        for (int i = 0; i < 3; i++) {
+            final int index = i;
+            new Thread(() -> {
+                excelReader.read(EasyExcelFactory.readSheet(index).build());
+                pandas.addAll(listener.getData());
+            });
+        }
+        excelReader.finish();
+
+
+        // 第二种读取多Sheet的方式（比较稳妥，但需要创建多个监听器和多次读取）
+        for (int i = 0; i < 3; i++) {
+            CommonListener<PandaReadModel> listener1 = new CommonListener<>(PandaReadModel.class);
+            EasyExcel.read(fileName, PandaReadModel.class, listener1).sheet(i).doRead();
+            pandas.addAll(listener1.getData());
+        }
+
+        System.out.println("读取excel文件结束，总计解析到" + pandas.size() + "条数据！");
+        pandas.forEach(System.out::println);
+    }
+
+    public static void main(String[] args) throws InterruptedException {
+        readDemo3();
     }
 }

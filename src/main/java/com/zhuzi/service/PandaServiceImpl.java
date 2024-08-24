@@ -15,16 +15,20 @@ import com.zhuzi.enums.ResponseCode;
 import com.zhuzi.enums.Sex;
 import com.zhuzi.enums.TaskHandleStatus;
 import com.zhuzi.exception.BusinessException;
+import com.zhuzi.listener.BatchHandleListener;
+import com.zhuzi.listener.ParallelBatchHandleListener;
 import com.zhuzi.listener.CommonListener;
 import com.zhuzi.mapper.PandaMapper;
 import com.zhuzi.model.bo.PandaStatisticsBO;
 import com.zhuzi.model.dto.PandaQueryDTO;
 import com.zhuzi.model.dto.PandaStatisticsDTO;
+import com.zhuzi.model.excel.Panda1mReadModel;
 import com.zhuzi.model.excel.PandaReadErrorModel;
 import com.zhuzi.model.excel.PandaReadModel;
 import com.zhuzi.model.vo.*;
 import com.zhuzi.util.ExcelUtil;
 import lombok.extern.slf4j.Slf4j;
+import ma.glasnost.orika.MapperFacade;
 import org.springframework.beans.BeanUtils;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
@@ -42,7 +46,6 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -55,6 +58,8 @@ public class PandaServiceImpl extends ServiceImpl<PandaMapper, Panda> implements
 
     @Resource
     private ExcelTaskService excelTaskService;
+    @Resource
+    private MapperFacade mapperFacade;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -374,4 +379,121 @@ public class PandaServiceImpl extends ServiceImpl<PandaMapper, Panda> implements
         editTask.setUpdateTime(new Date());
         excelTaskService.updateById(editTask);
     }
+
+    @Override
+    public void import1MExcelV1(MultipartFile file) {
+        CommonListener<Panda1mReadModel> listener = new CommonListener<>(Panda1mReadModel.class);
+        try {
+            EasyExcelFactory.read(file.getInputStream(), Panda1mReadModel.class, listener).sheet(0).doRead();
+        } catch (IOException e) {
+            log.error("导入百万熊猫数据出错：{}: {}", e, e.getMessage());
+            throw new BusinessException(ResponseCode.ANALYSIS_EXCEL_ERROR, "网络繁忙，请稍后重试！");
+        }
+        List<Panda1mReadModel> data = listener.getData();
+        log.info("导入百万级熊猫数据，成功解析到：{}条！", data.size());
+    }
+
+    @Override
+    public void import1MExcelV2(MultipartFile file) {
+        BatchHandleListener<Panda1mReadModel> listener = new BatchHandleListener<>(Panda1mReadModel.class, this::batchSavePandas);
+        try {
+            EasyExcelFactory.read(file.getInputStream(), Panda1mReadModel.class, listener).sheet(0).doRead();
+        } catch (IOException e) {
+            log.error("导入百万熊猫数据出错：{}: {}", e, e.getMessage());
+            throw new BusinessException(ResponseCode.ANALYSIS_EXCEL_ERROR, "网络繁忙，请稍后重试！");
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void batchSavePandas(List<Panda1mReadModel> excelData) {
+        // 这里可以先实现数据行校验、业务有效性校验等逻辑，清洗后再将数据入库
+        List<Panda> pandas = mapperFacade.mapAsList(excelData, Panda.class);
+        this.saveBatch(pandas);
+        pandas.clear();
+    }
+
+    @Override
+    public Long import1MExcelV3(MultipartFile file) {
+        // 先插入一条报表导入的任务记录
+        ExcelTask excelTask = new ExcelTask();
+        excelTask.setTaskType(ExcelTaskType.IMPORT.getCode());
+        excelTask.setHandleStatus(TaskHandleStatus.WAIT_HANDLE.getCode());
+        excelTask.setExcelUrl("实际请将传入的excel链接存入该字段");
+        excelTask.setCreateTime(new Date());
+        excelTaskService.save(excelTask);
+        Long taskId = excelTask.getTaskId();
+
+        // 将报表导入任务提交给异步线程池
+        ThreadPoolTaskExecutor asyncPool = TaskThreadPool.getAsyncThreadPool();
+        // 必须用try包裹，因为线程池已满时任务被拒绝会抛出异常
+        try {
+            asyncPool.submit(() -> {
+                handleImportTask(taskId, file);
+            });
+        } catch (RejectedExecutionException e) {
+            // 记录等待恢复的状态
+            log.error("递交异步导入任务被拒，线程池任务已满，任务ID：{}", taskId);
+            ExcelTask editTask = new ExcelTask();
+            editTask.setTaskId(taskId);
+            editTask.setHandleStatus(TaskHandleStatus.WAIT_TO_RESTORE.getCode());
+            editTask.setErrorMsg("等待重新载入线程池被调度！");
+            editTask.setExceptionType("异步线程池任务已满");
+            editTask.setUpdateTime(new Date());
+            excelTaskService.updateById(editTask);
+        }
+
+        return taskId;
+    }
+
+    /*
+    * 处理报表导入任务
+    *   说明：实际场景不需要传File，而是基于taskId获取文件链接解析
+    * */
+    private void handleImportTask(Long taskId, MultipartFile file) {
+        long startTime = System.currentTimeMillis();
+        log.info("处理报表导入任务开始，编号：{}，时间戳：{}", taskId, startTime);
+        excelTaskService.updateStatus(taskId, TaskHandleStatus.IN_PROGRESS);
+
+        ExcelTask editTask = new ExcelTask();
+        editTask.setTaskId(taskId);
+
+        ParallelBatchHandleListener<Panda1mReadModel> listener =
+                new ParallelBatchHandleListener<>(Panda1mReadModel.class, this::concurrentHandlePandas);
+        listener.initThreshold(5);
+        try {
+            EasyExcelFactory.read(file.getInputStream(), Panda1mReadModel.class, listener).sheet(0).doRead();
+        } catch (IOException e) {
+            log.error("导入百万熊猫数据出错：{}: {}", e, e.getMessage());
+            editTask.setHandleStatus(TaskHandleStatus.FAILED.getCode());
+            editTask.setExceptionType("导入时获取文件流出错");
+            editTask.setErrorMsg(e.getMessage());
+            editTask.setUpdateTime(new Date());
+            excelTaskService.updateById(editTask);
+            return;
+        }
+        log.info("处理报表导入任务结束，编号：{}，导出耗时（ms）：{}", taskId, System.currentTimeMillis() - startTime);
+
+        // 如果执行到最后，说明excel导出成功，将状态推进到导出成功
+        editTask.setHandleStatus(TaskHandleStatus.SUCCEED.getCode());
+        editTask.setUpdateTime(new Date());
+        excelTaskService.updateById(editTask);
+    }
+
+    /*
+    * 并发处理解析到的熊猫数据
+    * */
+    @SuppressWarnings("all")
+    private void concurrentHandlePandas(List<Panda1mReadModel> excelData, ParallelBatchHandleListener<Panda1mReadModel> listener) {
+        ThreadPoolTaskExecutor concurrentPool = TaskThreadPool.getConcurrentThreadPool();
+        concurrentPool.submit(() -> {
+            // 这里可以对数据行进行业务规则校验、清洗加工处理等逻辑处理
+            List<Panda> pandas = mapperFacade.mapAsList(excelData, Panda.class);
+            this.saveBatch(pandas);
+            pandas = null;
+            // 释放占用的许可
+            listener.getConcurrentThreshold().release();
+        });
+    }
+
 }

@@ -6,6 +6,7 @@ import com.zhuzi.base.BaseImportExcelVO;
 import com.zhuzi.entity.Panda;
 import com.zhuzi.model.dto.PandaQueryDTO;
 import com.zhuzi.model.dto.PandaStatisticsDTO;
+import com.zhuzi.model.excel.Panda1mReadModel;
 import com.zhuzi.model.excel.PandaReadModel;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -62,4 +63,25 @@ public interface PandaService extends IService<Panda> {
 	 * 导出百万量级的excel文件（优化版）
 	 * */
 	Long export1mPandaExcelV2();
+
+	/*
+	* 导入100W数据的excel文件（通用监听器）
+	* */
+    void import1MExcelV1(MultipartFile file);
+
+	/*
+	* 导入100W数据的excel文件（分批处理监听器）
+	* */
+	void import1MExcelV2(MultipartFile file);
+
+	/*
+	* 批量保存熊猫导入数据
+	* */
+	void batchSavePandas(List<Panda1mReadModel> excelData);
+
+	/*
+	* 导入100W数据的excel报表
+	* */
+	Long import1MExcelV3(MultipartFile file);
+
 }
