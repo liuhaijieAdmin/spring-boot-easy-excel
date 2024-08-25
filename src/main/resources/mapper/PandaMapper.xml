@@ -114,4 +114,8 @@
     <select id="selectTotalRows" resultType="java.lang.Integer">
         select count(*) from panda where is_deleted = 0
     </select>
+
+    <select id="selectAll" resultMap="pandaMap">
+        select * from panda where is_deleted = 0
+    </select>
 </mapper>

@@ -38,4 +38,6 @@ public interface PandaMapper extends BaseMapper<Panda> {
     List<Panda1mExportVO> selectPandaPage(@Param("startId") Long startId, @Param("rows") Integer rows);
 
     int selectTotalRows();
+
+    List<Panda> selectAll();
 }

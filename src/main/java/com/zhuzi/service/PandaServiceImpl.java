@@ -4,16 +4,14 @@ import com.alibaba.excel.EasyExcelFactory;
 import com.alibaba.excel.ExcelWriter;
 import com.alibaba.excel.support.ExcelTypeEnum;
 import com.alibaba.excel.write.metadata.WriteSheet;
+import com.alibaba.excel.write.metadata.fill.FillConfig;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.zhuzi.base.BaseImportExcelVO;
 import com.zhuzi.base.CountVO;
 import com.zhuzi.config.TaskThreadPool;
 import com.zhuzi.entity.ExcelTask;
 import com.zhuzi.entity.Panda;
-import com.zhuzi.enums.ExcelTaskType;
-import com.zhuzi.enums.ResponseCode;
-import com.zhuzi.enums.Sex;
-import com.zhuzi.enums.TaskHandleStatus;
+import com.zhuzi.enums.*;
 import com.zhuzi.exception.BusinessException;
 import com.zhuzi.listener.BatchHandleListener;
 import com.zhuzi.listener.ParallelBatchHandleListener;
@@ -39,10 +37,8 @@ import javax.annotation.Resource;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-import java.util.Map;
+import java.math.RoundingMode;
+import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
@@ -444,6 +440,107 @@ public class PandaServiceImpl extends ServiceImpl<PandaMapper, Panda> implements
         }
 
         return taskId;
+    }
+
+    @Override
+    public void exportPandaStatisticsData(HttpServletResponse response) {
+        // 查询熊猫集合数据
+        List<Panda> pandas = baseMapper.selectAll();
+
+
+        // 初始化各统计项变量
+        String statisticsUser = "竹子爱熊猫";
+        Date statisticsDate = new Date();
+        int maleNumber=0, femaleNumber=0, unknownNumber=0, totalNumber=0,
+                weekIncreaseNumber=0, monthIncreaseNumber=0, yearIncreaseNumber=0;
+        BigDecimal avgHeight, maxHeight=null, minHeight=null, sumHeight=BigDecimal.ZERO;
+
+        Calendar today = Calendar.getInstance();
+        int currentYear = today.get(Calendar.YEAR);
+        int currentMonth = today.get(Calendar.MONTH) + 1;
+        int currentWeek = today.get(Calendar.WEEK_OF_YEAR);
+
+        for (Panda panda : pandas) {
+            // 统计各项性别数据
+            Sex sex = Sex.ofCode(panda.getSex());
+            switch (sex) {
+                case MALE:
+                    maleNumber++;
+                    break;
+                case FEMALE:
+                    femaleNumber++;
+                    break;
+                default:
+                    unknownNumber++;
+                    break;
+            }
+
+            // 统计各项身高数据
+            BigDecimal height = panda.getHeight();
+            sumHeight = sumHeight.add(height);
+            if (null == maxHeight) {
+                maxHeight = height;
+            }
+            if (null == minHeight) {
+                minHeight = height;
+            }
+
+            if (minHeight.compareTo(height) < 0) {
+                minHeight = height;
+            }
+            if (maxHeight.compareTo(height) > 0) {
+                maxHeight = height;
+            }
+
+            // 统计本年、本月、本周新增人数
+            Calendar createCal = Calendar.getInstance();
+            createCal.setTime(panda.getCreateTime());
+            int year = createCal.get(Calendar.YEAR);
+            int month = createCal.get(Calendar.MONTH) + 1;
+            int week = createCal.get(Calendar.WEEK_OF_YEAR);
+            if (year == currentYear) {
+                yearIncreaseNumber++;
+                if (month == currentMonth) {
+                    monthIncreaseNumber++;
+                    if (week == currentWeek) {
+                        weekIncreaseNumber++;
+                    }
+                }
+            }
+        }
+        totalNumber = pandas.size();
+        avgHeight = sumHeight.divide(new BigDecimal(totalNumber), RoundingMode.HALF_UP);
+
+        Map<String, Object> dataMap = new HashMap<>(13);
+        dataMap.put("statisticsUser", statisticsUser);
+        dataMap.put("statisticsDate", statisticsDate);
+        dataMap.put("maleNumber", maleNumber);
+        dataMap.put("femaleNumber", femaleNumber);
+        dataMap.put("unknownNumber", unknownNumber);
+        dataMap.put("weekIncreaseNumber", weekIncreaseNumber);
+        dataMap.put("monthIncreaseNumber", monthIncreaseNumber);
+        dataMap.put("yearIncreaseNumber", yearIncreaseNumber);
+        dataMap.put("avgHeight", avgHeight);
+        dataMap.put("maxHeight", maxHeight);
+        dataMap.put("minHeight", minHeight);
+        dataMap.put("totalNumber", totalNumber);
+        dataMap.put("illustrate", "以上数据来自熊猫表");
+
+        String fileName = "熊猫数据统计报表";
+        try {
+            // 获取一个已设置基础参数的ExcelWriter对象
+            ExcelWriter excelWriter = ExcelUtil.initExportFillWriter(fileName,
+                    ExcelTypeEnum.XLSX, ExcelTemplate.PANDA_STATISTICS, response);
+            WriteSheet writeSheet = EasyExcelFactory.writerSheet().build();
+            // 基于模板填充数据
+            FillConfig fillConfig = FillConfig.builder().forceNewRow(Boolean.TRUE).build();
+            excelWriter.fill(pandas, fillConfig, writeSheet);
+            excelWriter.fill(dataMap, writeSheet);
+            excelWriter.finish();
+        }
+        catch (IOException e) {
+            throw new BusinessException("熊猫统计报表导出失败！");
+        }
     }
 
     /*

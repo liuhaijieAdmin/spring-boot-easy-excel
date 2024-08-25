@@ -84,4 +84,8 @@ public interface PandaService extends IService<Panda> {
 	* */
 	Long import1MExcelV3(MultipartFile file);
 
+	/*
+	* 导出熊猫统计数据（复杂报表）
+	* */
+    void exportPandaStatisticsData(HttpServletResponse response);
 }

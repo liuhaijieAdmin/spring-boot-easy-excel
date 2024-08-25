@@ -35,4 +35,13 @@ public enum Sex {
         return UNKNOWN.value;
     }
 
+    public static Sex ofCode(Integer code) {
+        for (Sex sex : Sex.values()) {
+            if (code.equals(sex.code)) {
+                return sex;
+            }
+        }
+        return UNKNOWN;
+    }
+
 }

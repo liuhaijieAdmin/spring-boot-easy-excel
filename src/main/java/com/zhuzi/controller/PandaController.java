@@ -98,4 +98,9 @@ public class PandaController {
     public ServerResponse<Long> exportExcelV6() {
         return ServerResponse.success(pandaService.export1mPandaExcelV2());
     }
+
+    @PostMapping("/export/v7")
+    public void exportExcelV7(HttpServletResponse response) {
+        pandaService.exportPandaStatisticsData(response);
+    }
 }

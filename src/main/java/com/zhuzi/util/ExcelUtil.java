@@ -1,6 +1,7 @@
 package com.zhuzi.util;
 
 import com.alibaba.excel.EasyExcelFactory;
+import com.alibaba.excel.ExcelWriter;
 import com.alibaba.excel.annotation.ExcelIgnore;
 import com.alibaba.excel.annotation.ExcelIgnoreUnannotated;
 import com.alibaba.excel.annotation.ExcelProperty;
@@ -10,6 +11,7 @@ import com.alibaba.excel.write.builder.ExcelWriterBuilder;
 import com.alibaba.excel.write.metadata.style.WriteCellStyle;
 import com.alibaba.excel.write.metadata.style.WriteFont;
 import com.alibaba.excel.write.style.HorizontalCellStyleStrategy;
+import com.zhuzi.enums.ExcelTemplate;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.HorizontalAlignment;
 import org.apache.poi.ss.usermodel.IndexedColors;
@@ -17,6 +19,7 @@ import org.apache.poi.ss.usermodel.IndexedColors;
 import javax.servlet.http.HttpServletResponse;
 import java.io.File;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Field;
 import java.net.URLEncoder;
 import java.util.*;
@@ -41,8 +44,31 @@ public class ExcelUtil {
     * */
     public static void exportExcel(Class<?> clazz, List<?> excelData, String fileName, ExcelTypeEnum excelType, HttpServletResponse response) throws IOException {
         HorizontalCellStyleStrategy styleStrategy = setCellStyle();
+        setResponse(fileName, excelType, response);
+        ExcelWriterBuilder writeWork = EasyExcelFactory.write(response.getOutputStream(), clazz);
+        writeWork.registerWriteHandler(styleStrategy).excelType(excelType).sheet().doWrite(excelData);
+    }
+
+    /*
+    * 初始化模板填充导出场景的写对象
+    * */
+    public static ExcelWriter initExportFillWriter(String fileName, ExcelTypeEnum excelType, ExcelTemplate template, HttpServletResponse response) throws IOException {
+        setResponse(fileName, excelType, response);
+        return EasyExcelFactory.write(response.getOutputStream())
+                .excelType(excelType)
+                .withTemplate(template.getPath()).build();
+    }
+
+    /*
+    * 设置通用的响应头信息
+    * */
+    public static void setResponse(String fileName, ExcelTypeEnum excelType, HttpServletResponse response) {
         // 对文件名进行UTF-8编码、拼接文件后缀名
-        fileName = URLEncoder.encode(fileName, "UTF-8").replaceAll("\\+", "%20") + excelType.getValue();
+        try {
+            fileName = URLEncoder.encode(fileName, "UTF-8").replaceAll("\\+", "%20") + excelType.getValue();
+        } catch (UnsupportedEncodingException e) {
+            throw new RuntimeException(e);
+        }
         switch (excelType) {
             case XLS:
                 response.setContentType(XLS_CONTENT_TYPE);
@@ -56,9 +82,6 @@ public class ExcelUtil {
         }
         response.setCharacterEncoding("utf-8");
         response.setHeader("Content-Disposition", "attachment;filename*=utf-8''" + fileName);
-
-        ExcelWriterBuilder writeWork = EasyExcelFactory.write(response.getOutputStream(), clazz);
-        writeWork.registerWriteHandler(styleStrategy).excelType(excelType).sheet().doWrite(excelData);
     }
 
     /*
