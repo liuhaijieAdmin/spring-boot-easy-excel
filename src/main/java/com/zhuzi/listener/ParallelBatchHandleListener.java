@@ -108,11 +108,21 @@ public class ParallelBatchHandleListener<T> extends AnalysisEventListener<T> {
     public void doAfterAllAnalysed(AnalysisContext analysisContext) {
         // 因为最后一批可能达不到指定的上限，所以解析完之后要做一次收尾处理
         if (data.size() != 0) {
+            // 如果开启了并发阈值控制，则先获取许可后再触发业务逻辑
+            if (null != concurrentThreshold) {
+                try {
+                    concurrentThreshold.acquire();
+                } catch (InterruptedException e) {
+                    log.error("阻塞等待获取许可被中断，{}：{}", e, e.getMessage());
+                    return;
+                }
+            }
+
             this.businessHandler.accept(data, this);
             // 更新读取到的总行数、批次数，以及清理集合辅助GC
             rows += data.size();
             batchNo++;
-            data.clear();
+            data = null;
         }
     }
 
